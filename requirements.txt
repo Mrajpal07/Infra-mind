@@ -14,7 +14,11 @@ python-multipart>=0.0.6
 # HTTP client (optional)
 httpx>=0.26.0
 
+# Monitoring
+prometheus_client>=0.19.0
+
 # Database drivers (optional - uncomment as needed)
 # sqlalchemy>=2.0.0
 # asyncpg>=0.29.0
 # redis>=5.0.0
+

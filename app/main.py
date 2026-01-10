@@ -6,6 +6,7 @@ from fastapi import FastAPI
 
 from app.api.v1 import health, metrics, sla
 from app.core.config import settings
+from app.core.prometheus import PrometheusMiddleware, get_metrics
 
 
 @asynccontextmanager
@@ -28,6 +29,9 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Add Prometheus middleware
+app.add_middleware(PrometheusMiddleware)
+
 # Mount API v1 routers
 app.include_router(health.router, prefix="/api/v1")
 app.include_router(metrics.router, prefix="/api/v1")
@@ -41,7 +45,14 @@ async def root():
         "service": settings.app_name,
         "docs": "/docs",
         "health": "/api/v1/health",
+        "metrics": "/metrics",
     }
+
+
+@app.get("/metrics", tags=["Monitoring"], include_in_schema=False)
+async def prometheus_metrics():
+    """Prometheus metrics endpoint."""
+    return get_metrics()
 
 
 if __name__ == "__main__":
@@ -53,4 +64,3 @@ if __name__ == "__main__":
         port=8000,
         reload=settings.debug,
     )
-
