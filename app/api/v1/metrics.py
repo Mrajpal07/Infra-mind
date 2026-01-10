@@ -2,9 +2,10 @@
 
 from datetime import datetime
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
+from app.services.anomaly_service import AnomalyResult, detect_anomaly
 from app.services.metric_service import MetricEntry, metric_service
 
 router = APIRouter(prefix="/metrics", tags=["Metrics"])
@@ -85,4 +86,28 @@ async def get_latest_metric(resource_id: str) -> MetricResponse:
         gpu_usage=metric.gpu_usage,
         timestamp=metric.timestamp,
     )
+
+
+@router.get(
+    "/{resource_id}/analyze",
+    response_model=AnomalyResult,
+    status_code=status.HTTP_200_OK,
+    summary="Analyze metrics for anomalies",
+    description="Run anomaly detection on recent metrics using Z-score analysis.",
+)
+async def analyze_metrics(
+    resource_id: str,
+    window_size: int = Query(10, ge=2, le=100, description="Rolling window size"),
+) -> AnomalyResult:
+    """Analyze metrics for anomalies."""
+    result = detect_anomaly(resource_id, window_size=window_size)
+    
+    # Return 404 if insufficient data
+    if "Insufficient" in result.explanation or "No metrics" in result.explanation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=result.explanation,
+        )
+    
+    return result
 
