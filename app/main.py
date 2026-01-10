@@ -34,6 +34,16 @@ app.include_router(metrics.router, prefix="/api/v1")
 app.include_router(sla.router, prefix="/api/v1")
 
 
+@app.get("/", tags=["Root"])
+async def root():
+    """Root endpoint with API information."""
+    return {
+        "service": settings.app_name,
+        "docs": "/docs",
+        "health": "/api/v1/health",
+    }
+
+
 if __name__ == "__main__":
     import uvicorn
     
@@ -43,3 +53,4 @@ if __name__ == "__main__":
         port=8000,
         reload=settings.debug,
     )
+
