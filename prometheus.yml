@@ -1,0 +1,12 @@
+# Prometheus configuration for infra-mind API
+# Run: prometheus --config.file=prometheus.yml
+
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
+
+scrape_configs:
+  - job_name: 'infra-mind-api'
+    static_configs:
+      - targets: ['localhost:8000']
+    metrics_path: '/metrics'
