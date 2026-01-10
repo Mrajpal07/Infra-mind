@@ -1,6 +1,6 @@
 # Infra-Mind
 
-Infrastructure monitoring and SLA management API built with FastAPI.
+Infrastructure monitoring, metrics ingestion, and anomaly detection API built with FastAPI.
 
 ## Tech Stack
 
@@ -13,28 +13,19 @@ Infrastructure monitoring and SLA management API built with FastAPI.
 ```
 infra-mind/
 ├── app/
-│   ├── main.py              # FastAPI app, router mounting
+│   ├── main.py                  # FastAPI app, router mounting
 │   ├── api/v1/
-│   │   ├── health.py        # GET /health
-│   │   ├── metrics.py       # POST /ingest, GET /latest
-│   │   └── sla.py           # GET /sla/{resource_id}
+│   │   ├── health.py            # GET /health
+│   │   ├── metrics.py           # Metrics ingestion & analysis
+│   │   └── sla.py               # GET /sla/{resource_id}
 │   ├── core/
-│   │   └── config.py        # Environment config
+│   │   └── config.py            # Environment config
 │   └── services/
-│       └── metric_service.py # In-memory time-series store
+│       ├── metric_service.py    # In-memory time-series store
+│       └── anomaly_service.py   # Z-score anomaly detection
 ├── requirements.txt
 └── .env.example
 ```
-
-## Configuration
-
-Environment variables in `app/core/config.py`:
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `APP_NAME` | infra-mind-api | Application name |
-| `ENV` | development | Environment |
-| `DEBUG` | true | Debug mode |
 
 ## API Endpoints
 
@@ -43,23 +34,30 @@ Environment variables in `app/core/config.py`:
 | GET | `/api/v1/health` | Health check |
 | POST | `/api/v1/metrics/ingest` | Ingest metrics |
 | GET | `/api/v1/metrics/{id}/latest` | Latest metric |
+| GET | `/api/v1/metrics/{id}/analyze` | Anomaly detection |
+| GET | `/api/v1/metrics/{id}/debug` | Debug: view stored metrics |
 | GET | `/api/v1/sla/{resource_id}` | SLA status |
 
-## Metric Service
+## Anomaly Detection
 
-Thread-safe in-memory store in `app/services/metric_service.py`:
+**Algorithm**: `zscore_v1`
+- Rolling window Z-score analysis
+- Sample standard deviation (n-1 denominator)
+- Configurable window_size and z_threshold
+
+**Status values**: `OK`, `ANOMALY`, `INSUFFICIENT_DATA`
 
 ```python
-from app.services.metric_service import metric_service
+from app.services.anomaly_service import detect_anomaly
 
-metric_service.add_metric(entry)
-metric_service.get_latest_metric(resource_id)
-metric_service.get_metrics_last_n_minutes(resource_id, 5)
+result = detect_anomaly("server-001", window_size=10, z_threshold=2.0)
+# result.status, result.anomaly_detected, result.algorithm
 ```
 
 ## Running Locally
 
 ```bash
+pip install -r requirements.txt
 uvicorn app.main:app --reload
 ```
 

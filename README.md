@@ -1,43 +1,47 @@
 # Infra-Mind
 
-Infrastructure monitoring and SLA management API built with FastAPI.
+Infrastructure monitoring, metrics ingestion, and anomaly detection API.
 
 ## Features
 
-- **Metrics Ingestion** - Collect CPU, memory, and GPU usage metrics
-- **Time-Series Storage** - In-memory store with timestamp ordering
+- **Metrics Ingestion** - Collect CPU, memory, GPU usage with validation
+- **Time-Series Storage** - In-memory store with binary search optimization
+- **Anomaly Detection** - Z-score based detection with configurable thresholds
 - **SLA Monitoring** - Track SLA status for resources
-- **Health Checks** - API health monitoring
 
 ## Quick Start
 
 ```bash
-# Install dependencies
 pip install -r requirements.txt
-
-# Copy environment config
 cp .env.example .env
-
-# Run the server
 uvicorn app.main:app --reload
 ```
 
-Open **http://localhost:8000/docs** for interactive API documentation.
+Open **http://localhost:8000/docs** for API documentation.
 
 ## API Endpoints
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/` | API info |
-| GET | `/api/v1/health` | Health check |
-| POST | `/api/v1/metrics/ingest` | Ingest resource metrics |
-| GET | `/api/v1/metrics/{resource_id}/latest` | Get latest metric |
-| GET | `/api/v1/sla/{resource_id}` | Get SLA status |
+### Health
+```
+GET /api/v1/health
+```
+
+### Metrics
+```
+POST /api/v1/metrics/ingest          # Ingest metrics
+GET  /api/v1/metrics/{id}/latest     # Get latest metric
+GET  /api/v1/metrics/{id}/analyze    # Anomaly detection
+GET  /api/v1/metrics/{id}/debug      # Debug: view stored metrics
+```
+
+### SLA
+```
+GET /api/v1/sla/{resource_id}        # Get SLA status
+```
 
 ## Metrics Ingestion
 
 **POST** `/api/v1/metrics/ingest`
-
 ```json
 {
   "resource_id": "server-001",
@@ -48,28 +52,25 @@ Open **http://localhost:8000/docs** for interactive API documentation.
 }
 ```
 
-**Validation:**
-- `cpu_usage`, `memory_usage`, `gpu_usage`: 0-100 range
-- `timestamp`: ISO 8601 datetime format
+Validation: `cpu_usage`, `memory_usage`, `gpu_usage` must be 0-100.
 
-## Project Structure
+## Anomaly Detection
 
+**GET** `/api/v1/metrics/{resource_id}/analyze?window_size=10`
+
+```json
+{
+  "status": "ANOMALY",
+  "anomaly_detected": true,
+  "anomaly_metrics": ["cpu_usage"],
+  "explanation": "Anomaly detected: cpu_usage=95 (mean=47.5, std=2.5, z=19.0)",
+  "confidence_score": 1.0,
+  "algorithm": "zscore_v1"
+}
 ```
-infra-mind/
-├── app/
-│   ├── main.py              # FastAPI application
-│   ├── api/v1/
-│   │   ├── health.py        # Health endpoint
-│   │   ├── metrics.py       # Metrics endpoints
-│   │   └── sla.py           # SLA endpoint
-│   ├── core/
-│   │   └── config.py        # Environment config
-│   └── services/
-│       └── metric_service.py # Time-series store
-├── requirements.txt
-├── .env.example
-└── CLAUDE.md
-```
+
+**Algorithm**: Z-score with sample standard deviation (n-1)  
+**Status values**: `OK`, `ANOMALY`, `INSUFFICIENT_DATA`
 
 ## Configuration
 

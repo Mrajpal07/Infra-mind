@@ -100,14 +100,46 @@ async def analyze_metrics(
     window_size: int = Query(10, ge=2, le=100, description="Rolling window size"),
 ) -> AnomalyResult:
     """Analyze metrics for anomalies."""
-    result = detect_anomaly(resource_id, window_size=window_size)
+    try:
+        result = detect_anomaly(resource_id, window_size=window_size)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
     
     # Return 404 if insufficient data
-    if "Insufficient" in result.explanation or "No metrics" in result.explanation:
+    if result.status.value == "INSUFFICIENT_DATA":
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=result.explanation,
         )
     
     return result
+
+
+@router.get(
+    "/{resource_id}/debug",
+    status_code=status.HTTP_200_OK,
+    summary="Debug: View stored metrics",
+    description="Debug endpoint to view all stored metrics for a resource.",
+)
+async def debug_metrics(resource_id: str) -> dict:
+    """Debug endpoint to view stored metrics."""
+    metrics = metric_service.get_metrics_last_n_minutes(resource_id, minutes=60)
+    
+    return {
+        "resource_id": resource_id,
+        "total_count": len(metrics),
+        "metrics": [
+            {
+                "cpu": m.cpu_usage,
+                "memory": m.memory_usage,
+                "gpu": m.gpu_usage,
+                "timestamp": m.timestamp.isoformat(),
+            }
+            for m in metrics
+        ],
+    }
+
 

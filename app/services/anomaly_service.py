@@ -1,10 +1,19 @@
 """Anomaly detection service using Z-score rolling window analysis.
 
-Stateless and synchronous anomaly detection for CPU, memory, and GPU metrics.
-No ML libraries or persistence required.
+Algorithm: zscore_v1
+- Uses sample standard deviation (n-1 denominator) for unbiased estimation
+- Compares latest metric against a rolling window of historical data
+- Window slicing excludes the latest metric to avoid data leakage
+
+Z-score Behavior:
+- When std=0 (constant baseline), z-score returns 0.0
+- This means constant values are never flagged as anomalies
+- A non-zero deviation from a constant baseline will be detected once
+  variance exists in the historical window
 """
 
 import math
+from enum import Enum
 from typing import Optional
 
 from pydantic import BaseModel, Field
@@ -12,18 +21,28 @@ from pydantic import BaseModel, Field
 from app.services.metric_service import MetricEntry, metric_service
 
 
-# Default configuration
+# Configuration
 DEFAULT_WINDOW_SIZE = 10
-DEFAULT_Z_THRESHOLD = 3.0
+DEFAULT_Z_THRESHOLD = 2.0
+ALGORITHM_VERSION = "zscore_v1"
+
+
+class AnomalyStatus(str, Enum):
+    """Status of anomaly detection result."""
+    OK = "OK"
+    ANOMALY = "ANOMALY"
+    INSUFFICIENT_DATA = "INSUFFICIENT_DATA"
 
 
 class AnomalyResult(BaseModel):
     """Result of anomaly detection analysis."""
     
+    status: AnomalyStatus
     anomaly_detected: bool
     anomaly_metrics: list[str] = Field(default_factory=list)
     explanation: str
     confidence_score: float = Field(ge=0.0, le=1.0)
+    algorithm: str = ALGORITHM_VERSION
 
 
 def _calculate_mean(values: list[float]) -> float:
@@ -33,29 +52,35 @@ def _calculate_mean(values: list[float]) -> float:
     return sum(values) / len(values)
 
 
-def _calculate_std(values: list[float], mean: float) -> float:
-    """Calculate standard deviation of values."""
-    if len(values) < 2:
+def _calculate_sample_std(values: list[float], mean: float) -> float:
+    """Calculate sample standard deviation using (n-1) denominator.
+    
+    Uses Bessel's correction for unbiased estimation of population
+    standard deviation from a sample.
+    """
+    n = len(values)
+    if n < 2:
         return 0.0
-    variance = sum((x - mean) ** 2 for x in values) / len(values)
+    # Sample variance uses (n-1) denominator
+    variance = sum((x - mean) ** 2 for x in values) / (n - 1)
     return math.sqrt(variance)
 
 
 def _calculate_z_score(value: float, mean: float, std: float) -> float:
-    """Calculate Z-score for a value."""
+    """Calculate Z-score for a value.
+    
+    Note: When std=0 (constant baseline), returns 0.0.
+    This means a constant baseline will not trigger anomalies.
+    """
     if std == 0:
         return 0.0
     return abs(value - mean) / std
 
 
 def _z_score_to_confidence(z_score: float, threshold: float) -> float:
-    """Convert Z-score to confidence score (0.0–1.0).
-    
-    Higher Z-scores above threshold result in higher confidence.
-    """
+    """Convert Z-score to confidence score (0.0–1.0)."""
     if z_score <= threshold:
         return 0.0
-    # Scale confidence: z_score at threshold = 0, z_score at 2x threshold = 1.0
     confidence = min((z_score - threshold) / threshold, 1.0)
     return round(confidence, 3)
 
@@ -67,16 +92,13 @@ def detect_anomaly(
 ) -> AnomalyResult:
     """Detect anomalies in the latest metric using Z-score analysis.
     
-    Analyzes CPU, memory, and GPU usage against a rolling window of
-    historical metrics.
-    
     Args:
         resource_id: The resource to analyze
-        window_size: Number of historical metrics to use (default: 10)
-        z_threshold: Z-score threshold for anomaly detection (default: 3.0)
+        window_size: Number of historical metrics for baseline (default: 10)
+        z_threshold: Z-score threshold for anomaly detection (default: 2.0)
     
     Returns:
-        AnomalyResult with detection status, flagged metrics, and explanation
+        AnomalyResult with status, detection flag, and explanation
     
     Raises:
         ValueError: If resource_id is empty or parameters are invalid
@@ -88,74 +110,84 @@ def detect_anomaly(
     if z_threshold <= 0:
         raise ValueError("z_threshold must be positive")
     
-    # Get latest metric
-    latest = metric_service.get_latest_metric(resource_id)
-    if latest is None:
+    # Get all historical metrics
+    all_metrics = metric_service.get_metrics_last_n_minutes(resource_id, minutes=60)
+    
+    if not all_metrics:
         return AnomalyResult(
+            status=AnomalyStatus.INSUFFICIENT_DATA,
             anomaly_detected=False,
             anomaly_metrics=[],
             explanation=f"No metrics available for resource '{resource_id}'",
             confidence_score=0.0,
         )
     
-    # Get historical metrics for rolling window
-    # Use a large time window and limit by window_size
-    historical = metric_service.get_metrics_last_n_minutes(resource_id, minutes=60)
-    
-    # Need at least window_size entries for meaningful analysis
-    if len(historical) < window_size:
+    # Need at least window_size + 1 entries (window + 1 to analyze)
+    if len(all_metrics) < window_size + 1:
         return AnomalyResult(
+            status=AnomalyStatus.INSUFFICIENT_DATA,
             anomaly_detected=False,
             anomaly_metrics=[],
-            explanation=f"Insufficient data: {len(historical)} metrics available, need {window_size}",
+            explanation=f"Insufficient data: {len(all_metrics)} metrics, need {window_size + 1}",
             confidence_score=0.0,
         )
     
-    # Use the last window_size entries (excluding the latest for baseline)
-    window = historical[-(window_size + 1):-1] if len(historical) > window_size else historical[:-1]
+    # Latest metric is the one we're analyzing
+    latest = all_metrics[-1]
     
-    if len(window) < 2:
-        return AnomalyResult(
-            anomaly_detected=False,
-            anomaly_metrics=[],
-            explanation="Insufficient baseline data for analysis",
-            confidence_score=0.0,
-        )
+    # Window slicing: use previous N metrics, excluding latest
+    # This avoids data leakage - we don't include the value we're testing
+    # in the baseline statistics
+    window = all_metrics[-(window_size + 1):-1]
     
     # Analyze each metric type
     anomalies: list[str] = []
     z_scores: dict[str, float] = {}
+    details: dict[str, dict] = {}
     
     for metric_name in ["cpu_usage", "memory_usage", "gpu_usage"]:
         values = [getattr(m, metric_name) for m in window]
         current_value = getattr(latest, metric_name)
         
         mean = _calculate_mean(values)
-        std = _calculate_std(values, mean)
+        std = _calculate_sample_std(values, mean)
         z_score = _calculate_z_score(current_value, mean, std)
         
         z_scores[metric_name] = z_score
+        details[metric_name] = {
+            "current": current_value,
+            "mean": round(mean, 2),
+            "std": round(std, 2),
+            "z_score": round(z_score, 2),
+        }
         
         if z_score > z_threshold:
             anomalies.append(metric_name)
     
-    # Calculate overall confidence score
+    # Determine status and confidence
     if anomalies:
+        status = AnomalyStatus.ANOMALY
         max_z = max(z_scores[m] for m in anomalies)
         confidence = _z_score_to_confidence(max_z, z_threshold)
     else:
+        status = AnomalyStatus.OK
         confidence = 0.0
     
     # Build explanation
     if anomalies:
-        details = ", ".join(
-            f"{m}: z={z_scores[m]:.2f}" for m in anomalies
-        )
-        explanation = f"Anomaly detected in {', '.join(anomalies)}. Z-scores: {details}. Threshold: {z_threshold}"
+        anomaly_details = []
+        for m in anomalies:
+            d = details[m]
+            anomaly_details.append(
+                f"{m}={d['current']} (mean={d['mean']}, std={d['std']}, z={d['z_score']})"
+            )
+        explanation = f"Anomaly detected: {'; '.join(anomaly_details)}. Threshold: {z_threshold}"
     else:
-        explanation = f"All metrics within normal range (z-threshold: {z_threshold})"
+        max_z = max(z_scores.values()) if z_scores else 0
+        explanation = f"All metrics normal. Max z-score: {max_z:.2f}, threshold: {z_threshold}"
     
     return AnomalyResult(
+        status=status,
         anomaly_detected=len(anomalies) > 0,
         anomaly_metrics=anomalies,
         explanation=explanation,
