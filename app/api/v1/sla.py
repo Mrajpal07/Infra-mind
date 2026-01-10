@@ -7,7 +7,8 @@ not SLA compliance measurement.
 from fastapi import APIRouter, HTTPException, Query, status
 from pydantic import BaseModel
 
-from app.services.sla_risk_service import RiskStatus, SLARiskResult, compute_sla_risk
+from app.core.prometheus import SLA_RISK_CHECKS, SLA_HIGH_RISK
+from app.services.sla_risk_service import RiskLevel, RiskStatus, SLARiskResult, compute_sla_risk
 
 router = APIRouter(prefix="/sla", tags=["SLA"])
 
@@ -55,6 +56,11 @@ async def get_sla_risk(
         HTTPException 404: Insufficient data
     """
     result = compute_sla_risk(resource_id, lookback_minutes=lookback_minutes)
+    
+    SLA_RISK_CHECKS.inc()
+    
+    if result.risk_level == RiskLevel.HIGH:
+        SLA_HIGH_RISK.inc()
     
     if result.status == RiskStatus.INSUFFICIENT_DATA:
         raise HTTPException(

@@ -5,6 +5,7 @@ from datetime import datetime
 from fastapi import APIRouter, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
+from app.core.prometheus import METRICS_INGESTED, ANOMALY_CHECKS
 from app.services.anomaly_service import AnomalyResult, detect_anomaly
 from app.services.metric_service import MetricEntry, metric_service
 
@@ -55,6 +56,7 @@ async def ingest_metrics(metrics: MetricIngest) -> IngestResponse:
         timestamp=metrics.timestamp,
     )
     metric_service.add_metric(entry)
+    METRICS_INGESTED.inc()
     
     return IngestResponse(
         message="Metric ingested",
@@ -107,6 +109,8 @@ async def analyze_metrics(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e),
         )
+    
+    ANOMALY_CHECKS.inc()
     
     # Return 404 if insufficient data
     if result.status.value == "INSUFFICIENT_DATA":

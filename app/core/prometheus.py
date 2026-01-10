@@ -8,7 +8,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response as StarletteResponse
 
 
-# Prometheus metrics
+# HTTP request metrics
 REQUEST_COUNT = Counter(
     "http_requests_total",
     "Total HTTP requests",
@@ -20,6 +20,27 @@ REQUEST_LATENCY = Histogram(
     "HTTP request latency in seconds",
     ["method", "path"],
     buckets=[0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0],
+)
+
+# Custom business metrics
+METRICS_INGESTED = Counter(
+    "metrics_ingested_total",
+    "Total metrics ingested",
+)
+
+ANOMALY_CHECKS = Counter(
+    "anomaly_checks_total",
+    "Total anomaly detection checks",
+)
+
+SLA_RISK_CHECKS = Counter(
+    "sla_risk_checks_total",
+    "Total SLA risk assessments",
+)
+
+SLA_HIGH_RISK = Counter(
+    "sla_high_risk_total",
+    "Total high risk SLA assessments",
 )
 
 
