@@ -13,21 +13,22 @@ Infrastructure monitoring and SLA management API built with FastAPI.
 ```
 infra-mind/
 ├── app/
-│   ├── main.py              # FastAPI app, router mounting, startup logs
+│   ├── main.py              # FastAPI app, router mounting
 │   ├── api/v1/
 │   │   ├── health.py        # GET /health
-│   │   ├── metrics.py       # POST /metrics/ingest
+│   │   ├── metrics.py       # POST /ingest, GET /latest
 │   │   └── sla.py           # GET /sla/{resource_id}
-│   └── core/
-│       └── config.py        # Environment config (APP_NAME, ENV, DEBUG)
+│   ├── core/
+│   │   └── config.py        # Environment config
+│   └── services/
+│       └── metric_service.py # In-memory time-series store
 ├── requirements.txt
-├── .env.example
-└── README.md
+└── .env.example
 ```
 
 ## Configuration
 
-Environment variables loaded via pydantic-settings in `app/core/config.py`:
+Environment variables in `app/core/config.py`:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -40,14 +41,25 @@ Environment variables loaded via pydantic-settings in `app/core/config.py`:
 | Method | Route | Description |
 |--------|-------|-------------|
 | GET | `/api/v1/health` | Health check |
-| POST | `/api/v1/metrics/ingest` | Ingest resource metrics |
-| GET | `/api/v1/sla/{resource_id}` | Get SLA status |
+| POST | `/api/v1/metrics/ingest` | Ingest metrics |
+| GET | `/api/v1/metrics/{id}/latest` | Latest metric |
+| GET | `/api/v1/sla/{resource_id}` | SLA status |
+
+## Metric Service
+
+Thread-safe in-memory store in `app/services/metric_service.py`:
+
+```python
+from app.services.metric_service import metric_service
+
+metric_service.add_metric(entry)
+metric_service.get_latest_metric(resource_id)
+metric_service.get_metrics_last_n_minutes(resource_id, 5)
+```
 
 ## Running Locally
 
 ```bash
-pip install -r requirements.txt
-cp .env.example .env
 uvicorn app.main:app --reload
 ```
 
